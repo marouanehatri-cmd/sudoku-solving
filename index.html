@@ -1,0 +1,885 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#FFFFFF" id="themeColor">
+<title>Sudoku Solver</title>
+<script>
+/* Apply saved theme before first paint */
+(function(){
+  var m='system';
+  try{ m=localStorage.getItem('theme_mode')||'system'; }catch(e){}
+  var dark = m==='dark' || (m==='system' && window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches);
+  document.documentElement.setAttribute('data-theme', dark?'dark':'light');
+})();
+</script>
+<style>
+:root{
+  --bg:#FFFFFF; --cell:#FFFFFF; --grid:#D0D3D8; --gridthick:#4A5361;
+  --given:#000000; --solved:#2196F3; --wrong:#D32F2F; --wrongbg:#FFCDD2;
+  --sel:#FFF0B3; --peer:#F1F4F8; --same:#D9EAFB;
+  --btn:#F1F3F5; --btnline:#D5D9DE; --text:#16202C; --muted:#667385;
+  --sheet:#FFFFFF; --scrim:rgba(0,0,0,.45);
+}
+:root[data-theme="dark"]{
+  --bg:#121212; --cell:#1E1E1E; --grid:#3A3A3A; --gridthick:#9AA3AE;
+  --given:#FFFFFF; --solved:#2196F3; --wrong:#D32F2F; --wrongbg:#FFCDD2;
+  --sel:#5A4B14; --peer:#262A30; --same:#1F3A58;
+  --btn:#2A2A2A; --btnline:#3D3D3D; --text:#F2F4F7; --muted:#9AA3AE;
+  --sheet:#1E1E1E; --scrim:rgba(0,0,0,.6);
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+[hidden]{display:none!important}
+html,body{margin:0;background:var(--bg);color:var(--text);
+  font-family:"Avenir Next","Trebuchet MS","Segoe UI",Roboto,sans-serif}
+main{max-width:460px;margin:0 auto;padding:calc(10px + env(safe-area-inset-top,0px)) 12px calc(20px + env(safe-area-inset-bottom,0px))}
+header{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
+h1{font-size:1.3rem;margin:0 2px;font-weight:700;letter-spacing:-.01em}
+.hbtns{display:flex;gap:8px}
+button{font:inherit;color:inherit;cursor:pointer;border:1.5px solid var(--btnline);background:var(--btn);border-radius:14px}
+button:focus-visible,.cell:focus-visible{outline:3px solid var(--solved);outline-offset:2px}
+.ibtn{width:44px;height:44px;padding:0;font-size:1.3rem;display:flex;align-items:center;justify-content:center}
+
+#board{display:grid;grid-template-columns:repeat(9,minmax(0,1fr));grid-template-rows:repeat(9,minmax(0,1fr));width:100%;aspect-ratio:1/1;background:var(--cell);
+  border:3px solid var(--gridthick);border-radius:8px;overflow:hidden;touch-action:manipulation;user-select:none;-webkit-user-select:none}
+.cell{min-width:0;min-height:0;overflow:hidden;line-height:1;padding:0;display:flex;align-items:center;justify-content:center;font-size:clamp(18px,6.4vw,28px);font-weight:400;
+  border-right:1px solid var(--grid);border-bottom:1px solid var(--grid);cursor:pointer;color:var(--given);background:var(--cell)}
+.cell:nth-child(9n){border-right:none}
+.cell:nth-child(n+73){border-bottom:none}
+.cell:nth-child(9n+3),.cell:nth-child(9n+6){border-right:2px solid var(--gridthick)}
+.cell:nth-child(n+19):nth-child(-n+27),.cell:nth-child(n+46):nth-child(-n+54){border-bottom:2px solid var(--gridthick)}
+.cell.peer{background:var(--peer)}
+.cell.same{background:var(--same)}
+.cell.sel{background:var(--sel)}
+.cell.clue{font-weight:700}
+.cell.hint,.cell.solved{color:var(--solved)}
+.cell.solved{font-weight:500}
+.cell.hint{font-weight:700}
+.cell.bad{background:var(--wrongbg);color:var(--wrong)}
+.cell.pop{animation:pop .35s ease-out both}
+@keyframes pop{from{opacity:0;transform:scale(.4)}to{opacity:1;transform:scale(1)}}
+@media (prefers-reduced-motion: reduce){.cell.pop{animation:none}}
+
+#status{min-height:2.7em;margin:10px 2px 8px;font-size:.92rem;line-height:1.35;color:var(--muted)}
+#status.ok{color:var(--solved);font-weight:600}
+#status.err{color:var(--wrong);font-weight:600}
+:root[data-theme="dark"] #status.err{color:#FF8A80}
+
+.seg{display:grid;grid-template-columns:1fr 1fr;gap:0;margin-bottom:12px;border:1.5px solid var(--btnline);border-radius:12px;overflow:hidden}
+.seg button{border:none;border-radius:0;height:40px;font-size:.9rem;font-weight:600;background:transparent;color:var(--muted)}
+.seg button[aria-pressed="true"]{background:var(--solved);color:#fff}
+
+/* All keys: identical squares */
+#keys{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));grid-auto-rows:auto;align-items:start;gap:8px}
+.key{aspect-ratio:1/1;width:100%;height:auto;min-width:0;min-height:0;overflow:hidden;padding:0;position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px}
+.key:active{transform:scale(.96)}
+.key .num{font-size:1.5rem;font-weight:700}
+.key .ico{font-size:1.45rem;line-height:1}
+.key .lbl{font-size:.68rem;font-weight:600;color:var(--muted);white-space:nowrap;line-height:1}
+.key.primary{background:var(--solved);border-color:var(--solved)}
+.key.primary .lbl{color:#fff}
+.badge{position:absolute;top:5px;right:6px;min-width:18px;height:18px;border-radius:9px;background:var(--solved);color:#fff;
+  font-size:.7rem;font-weight:700;display:flex;align-items:center;justify-content:center;padding:0 4px}
+.badge.zero{background:var(--muted)}
+
+#toast{position:fixed;left:50%;bottom:calc(24px + env(safe-area-inset-bottom,0px));transform:translateX(-50%) translateY(20px);
+  background:#222;color:#fff;padding:10px 16px;border-radius:12px;font-size:.9rem;max-width:88vw;text-align:center;
+  opacity:0;pointer-events:none;transition:opacity .2s,transform .2s;z-index:50}
+#toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+
+/* Settings bottom sheet */
+#scrim{position:fixed;inset:0;background:var(--scrim);z-index:30}
+#sheet{position:fixed;left:0;right:0;bottom:0;z-index:31;background:var(--sheet);border-radius:20px 20px 0 0;
+  padding:18px 18px calc(20px + env(safe-area-inset-bottom,0px));max-width:520px;margin:0 auto;box-shadow:0 -8px 30px rgba(0,0,0,.25)}
+#sheet h2{margin:0 0 12px;font-size:1.1rem}
+#sheet h3{margin:16px 0 8px;font-size:.8rem;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+.radio{display:flex;align-items:center;gap:12px;padding:12px 4px;font-size:1rem;cursor:pointer}
+.radio input{width:20px;height:20px;accent-color:#2196F3}
+.sbtn{display:block;width:100%;height:46px;margin-top:8px;font-weight:600}
+
+/* Scanner overlay */
+#scanner{position:fixed;inset:0;background:#000;z-index:40;color:#fff}
+#cam{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.guide{position:absolute;left:50%;top:46%;width:min(88vw,62vh);aspect-ratio:1;transform:translate(-50%,-50%);
+  border:2px solid rgba(255,255,255,.55);border-radius:14px;box-shadow:0 0 0 100vmax rgba(0,0,0,.35)}
+.guide i{position:absolute;width:28px;height:28px;border:4px solid #fff}
+.guide i:nth-child(1){left:-3px;top:-3px;border-right:none;border-bottom:none;border-radius:14px 0 0 0}
+.guide i:nth-child(2){right:-3px;top:-3px;border-left:none;border-bottom:none;border-radius:0 14px 0 0}
+.guide i:nth-child(3){left:-3px;bottom:-3px;border-right:none;border-top:none;border-radius:0 0 0 14px}
+.guide i:nth-child(4){right:-3px;bottom:-3px;border-left:none;border-top:none;border-radius:0 0 14px 0}
+#scanMsg{position:absolute;left:12px;right:12px;top:calc(46% + min(44vw,31vh) + 18px);text-align:center;font-size:1rem;font-weight:600;
+  text-shadow:0 1px 4px rgba(0,0,0,.8)}
+#scanMsg.warn{color:#FFD54F}
+.ibtn.light{position:absolute;top:calc(12px + env(safe-area-inset-top,0px));background:rgba(0,0,0,.45);border-color:rgba(255,255,255,.4);color:#fff}
+#flashBtn{left:12px}
+#flashBtn.on{background:#FFD54F;color:#000;border-color:#FFD54F}
+#scanClose{right:12px}
+#shutter{position:absolute;left:50%;bottom:calc(26px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);
+  width:76px;height:76px;padding:0;background:rgba(255,255,255,.2);border:3px solid #fff;border-radius:20px;display:flex;align-items:center;justify-content:center}
+#shutter span{width:52px;height:52px;border-radius:12px;background:#fff;display:block}
+#shutter:active span{transform:scale(.9)}
+#useAnyway{position:absolute;left:50%;bottom:calc(120px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);
+  padding:10px 18px;background:#fff;color:#000;font-weight:700;border-color:#fff}
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1 id="appTitle"></h1>
+    <div class="hbtns">
+      <button class="ibtn" id="undo" aria-label="Undo">↶</button>
+      <button class="ibtn" id="settingsBtn" aria-label="Settings">⚙️</button>
+    </div>
+  </header>
+
+  <div id="board" role="grid" aria-label="Sudoku board"></div>
+  <div id="status" role="status" aria-live="polite"></div>
+
+  <div class="seg" id="modeSeg">
+    <button data-m="setup" aria-pressed="true" id="segSetup"></button>
+    <button data-m="play" aria-pressed="false" id="segPlay"></button>
+  </div>
+
+  <div id="keys"></div>
+</main>
+
+<div id="toast" role="alert"></div>
+
+<!-- Settings bottom sheet -->
+<div id="scrim" hidden></div>
+<div id="sheet" hidden role="dialog" aria-modal="true" aria-labelledby="sheetTitle">
+  <h2 id="sheetTitle"></h2>
+  <h3 id="themeHead"></h3>
+  <label class="radio"><input type="radio" name="theme" value="light"><span id="thLight"></span></label>
+  <label class="radio"><input type="radio" name="theme" value="dark"><span id="thDark"></span></label>
+  <label class="radio"><input type="radio" name="theme" value="system"><span id="thSystem"></span></label>
+  <h3 id="moreHead"></h3>
+  <button class="sbtn" id="exampleBtn"></button>
+  <button class="sbtn" id="pasteBtn"></button>
+  <button class="sbtn" id="copyBtn"></button>
+  <button class="sbtn" id="closeSheet"></button>
+</div>
+
+<!-- Scanner overlay -->
+<div id="scanner" hidden>
+  <video id="cam" playsinline muted autoplay></video>
+  <div class="guide"><i></i><i></i><i></i><i></i></div>
+  <div id="scanMsg"></div>
+  <button class="ibtn light" id="flashBtn" aria-label="Flash">🔦</button>
+  <button class="ibtn light" id="scanClose" aria-label="Close">✕</button>
+  <button id="useAnyway" hidden></button>
+  <button id="shutter" aria-label="Capture"><span></span></button>
+</div>
+
+<input type="file" id="filePick" accept="image/*" hidden>
+<input type="file" id="fileCam" accept="image/*" capture="environment" hidden>
+
+<script>
+(() => {
+'use strict';
+
+/* ============ Strings (all user-facing text lives here) ============ */
+const STR = {
+  appTitle:'Sudoku Solver',
+  tap:'Tap a square, then pick a number.',
+  tapEmpty:'Tap an empty cell first',
+  cellFilled:'Cell already filled',
+  noHints:'No hints left for this puzzle',
+  clueLocked:'Clue cell is locked. Switch to Set clues to edit it.',
+  hintLocked:'Hint cells are locked',
+  tapFirst:'Tap a square first.',
+  fixRed:'Fix the red squares first. They break the sudoku rules.',
+  addNumbers:'Add at least one number first.',
+  noSolution:'No solution exists for these numbers. Check for a typo.',
+  ready:'Ready. Tap Play to start, or Solve.',
+  setClues:'✏️ Set clues',
+  play:'▶ Play',
+  playing:'Play mode: wrong numbers turn red.',
+  settingClues:'Set clues mode: type the numbers you have.',
+  undone:'Undone.',
+  cleared:'Board cleared.',
+  complete:'Puzzle complete! 🎉',
+  solvedOne:ms=>`Solved in ${ms} ms. This is the only solution.`,
+  solvedMany:ms=>`Solved in ${ms} ms. More than one solution exists; showing one.`,
+  reading:'Reading numbers…',
+  scanned:n=>`Found ${n} numbers. Check them, then tap Play or Solve.`,
+  scannedLow:n=>`Found ${n} numbers, but I'm not sure about some. Please check them.`,
+  noGrid:"Couldn't find the puzzle. Fit the whole grid in view and add light.",
+  noDigits:'No numbers were detected. Try again with better light.',
+  scanHint:'Fit the whole puzzle inside the square',
+  needLight:'Need more light',
+  flashOn:'Flash on',
+  flashNo:'Flash is not available on this camera',
+  useAnyway:'Use anyway',
+  imported:'Puzzle loaded. Tap Play or Solve.',
+  need81:n=>`Need exactly 81 characters. Got ${n}.`,
+  paste:'Paste 81 characters. Use 1-9 for numbers and 0 or . for empty squares.',
+  copied:'Copied the 81-digit puzzle.',
+  copyThis:'Copy this text:',
+  settings:'Settings', themeHead:'Theme', light:'Light', dark:'Dark', system:'System (default)',
+  moreHead:'More', example:'Load hard example', pasteBtn:'Paste 81 digits', copyBtn:'Copy puzzle as text', close:'Close',
+  keyScan:'Scan', keyImport:'Import', keyHint:'Hint', keySolve:'Solve', keyClear:'Clear', keyErase:'Erase'
+};
+
+const $ = id => document.getElementById(id);
+const MAX_HINTS = 3;
+
+/* ============ Theme ============ */
+const THEME_KEY = 'theme_mode';
+const getThemeMode = () => { try { return localStorage.getItem(THEME_KEY) || 'system'; } catch(e){ return 'system'; } };
+const mq = window.matchMedia ? matchMedia('(prefers-color-scheme: dark)') : null;
+function applyTheme(){
+  const m = getThemeMode();
+  const dark = m === 'dark' || (m === 'system' && mq && mq.matches);
+  document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
+  $('themeColor').setAttribute('content', dark ? '#121212' : '#FFFFFF');
+}
+if (mq && mq.addEventListener) mq.addEventListener('change', applyTheme);
+applyTheme();
+
+/* ============ State ============ */
+// kind: '' empty, 'c' clue, 'e' user entry, 'h' hint, 's' solver result
+let val = new Array(81).fill(0);
+let kind = new Array(81).fill('');
+let sel = -1, mode = 'setup', solution = null, unique = true;
+let hintCount = 0, solveCount = 0;
+let history = [];
+
+const peersOf = i => {
+  const r=(i/9)|0, c=i%9, set=new Set();
+  for(let k=0;k<9;k++){ set.add(r*9+k); set.add(k*9+c); }
+  const br=r-r%3, bc=c-c%3;
+  for(let a=0;a<3;a++) for(let b=0;b<3;b++) set.add((br+a)*9+bc+b);
+  set.delete(i); return [...set];
+};
+const PEERS = Array.from({length:81},(_,i)=>peersOf(i));
+
+/* ============ Build UI ============ */
+$('appTitle').textContent = STR.appTitle;
+$('segSetup').textContent = STR.setClues;
+$('segPlay').textContent = STR.play;
+
+const boardEl = $('board'), cells = [];
+for(let i=0;i<81;i++){
+  const c=document.createElement('div');
+  c.className='cell'; c.setAttribute('role','gridcell'); c.tabIndex=0;
+  c.addEventListener('click',()=>select(i));
+  boardEl.appendChild(c); cells.push(c);
+}
+
+const keysEl = $('keys');
+function addKey(cls, html, label, fn){
+  const b=document.createElement('button');
+  b.className='key '+cls; b.innerHTML=html; b.setAttribute('aria-label',label); b.addEventListener('click',fn);
+  keysEl.appendChild(b); return b;
+}
+for(let n=1;n<=9;n++) addKey('', `<span class="num">${n}</span>`, 'Enter '+n, ()=>enter(n));
+addKey('', `<span class="ico">⌫</span><span class="lbl">${STR.keyErase}</span>`, STR.keyErase, erase);
+addKey('', `<span class="ico">📷</span><span class="lbl">${STR.keyScan}</span>`, STR.keyScan, openScanner);
+addKey('', `<span class="ico">🖼️</span><span class="lbl">${STR.keyImport}</span>`, STR.keyImport, ()=>$('filePick').click());
+const hintKey = addKey('', `<span class="ico">💡</span><span class="lbl">${STR.keyHint}</span><span class="badge" id="hintBadge">${MAX_HINTS}</span>`, STR.keyHint, onHint);
+addKey('primary', `<span class="ico">✨</span><span class="lbl">${STR.keySolve}</span>`, STR.keySolve, solveAll);
+addKey('', `<span class="ico">🗑️</span><span class="lbl">${STR.keyClear}</span>`, STR.keyClear, clearAll);
+
+/* ============ Helpers ============ */
+let toastTimer=null;
+function toast(msg){
+  const t=$('toast'); t.textContent=msg; t.classList.add('show');
+  clearTimeout(toastTimer); toastTimer=setTimeout(()=>t.classList.remove('show'),2200);
+}
+function setStatus(msg,k){ const s=$('status'); s.textContent=msg; s.className=k||''; }
+function vibrate(ms){ try{ if(navigator.vibrate) navigator.vibrate(ms); }catch(e){} }
+
+function snapshot(){ return {val:val.slice(),kind:kind.slice(),mode,solution:solution?solution.slice():null,unique,hintCount}; }
+function pushHistory(snap){ history.push(snap||snapshot()); if(history.length>200) history.shift(); }
+function restore(s){ val=s.val; kind=s.kind; mode=s.mode; solution=s.solution; unique=s.unique; hintCount=s.hintCount; }
+
+function isWrong(i){                       // checkCell(r,c) equivalent
+  if(mode!=='play' || kind[i]!=='e' || !val[i]) return false;
+  if(solution && unique) return val[i]!==solution[i];
+  return PEERS[i].some(p=>val[p]===val[i]);
+}
+const checkCell = (r,c) => isWrong(r*9+c);
+
+function computeBad(){
+  const bad=new Set();
+  if(mode==='setup'){
+    for(let i=0;i<81;i++){ if(!val[i]) continue;
+      for(const p of PEERS[i]) if(val[p]===val[i]){ bad.add(i); bad.add(p); } }
+  } else {
+    for(let i=0;i<81;i++) if(isWrong(i)) bad.add(i);
+  }
+  return bad;
+}
+
+function render(animateSolved){
+  const bad=computeBad(), sv = sel>=0?val[sel]:0; let order=0;
+  for(let i=0;i<81;i++){
+    const c=cells[i]; c.textContent=val[i]||'';
+    let cls='cell';
+    if(sel>=0){ if(i===sel) cls+=' sel'; else if(sv&&val[i]===sv) cls+=' same'; else if(PEERS[sel].includes(i)) cls+=' peer'; }
+    const k=kind[i];
+    if(k==='c') cls+=' clue'; else if(k==='h') cls+=' hint'; else if(k==='s'){ cls+=' solved'; if(animateSolved){ cls+=' pop'; c.style.animationDelay=Math.min(order++*14,700)+'ms'; } }
+    if(bad.has(i)) cls+=' bad';
+    c.className=cls;
+    c.setAttribute('aria-label',`Row ${((i/9)|0)+1} column ${i%9+1}${val[i]?', '+val[i]:', empty'}`);
+  }
+  $('segSetup').setAttribute('aria-pressed', mode==='setup');
+  $('segPlay').setAttribute('aria-pressed', mode==='play');
+  const left=Math.max(0,MAX_HINTS-hintCount), b=$('hintBadge'); b.textContent=left; b.classList.toggle('zero',left===0);
+  return bad;
+}
+
+/* ============ Solver (bitmask + MRV backtracking) ============ */
+const popcount=x=>{let n=0;while(x){x&=x-1;n++;}return n;};
+function solve(grid,limit){
+  const g=grid.slice(), rows=new Array(9).fill(0), cols=new Array(9).fill(0), boxes=new Array(9).fill(0);
+  for(let i=0;i<81;i++){ if(!g[i]) continue;
+    const bit=1<<g[i], r=(i/9)|0, c=i%9, b=((r/3)|0)*3+((c/3)|0); rows[r]|=bit; cols[c]|=bit; boxes[b]|=bit; }
+  let count=0, first=null;
+  function rec(){
+    let best=-1,bestMask=0,bestN=10;
+    for(let i=0;i<81;i++){ if(g[i]) continue;
+      const r=(i/9)|0,c=i%9,b=((r/3)|0)*3+((c/3)|0), mask=~(rows[r]|cols[c]|boxes[b])&0x3FE, n=popcount(mask);
+      if(n<bestN){ best=i;bestMask=mask;bestN=n; if(n<=1) break; } }
+    if(best===-1){ count++; if(!first) first=g.slice(); return count>=limit; }
+    if(bestN===0) return false;
+    const r=(best/9)|0,c=best%9,b=((r/3)|0)*3+((c/3)|0);
+    for(let d=1;d<=9;d++){ const bit=1<<d; if(!(bestMask&bit)) continue;
+      g[best]=d; rows[r]|=bit; cols[c]|=bit; boxes[b]|=bit;
+      if(rec()) return true;
+      g[best]=0; rows[r]&=~bit; cols[c]&=~bit; boxes[b]&=~bit; }
+    return false;
+  }
+  rec(); return {count, solution:first};
+}
+
+/* Make sure we have a solution for the current clues (switches to Play). */
+function ensurePlay(){
+  if(mode==='play' && solution) return true;
+  const clues=val.map((v,i)=>kind[i]==='c'?v:0);
+  if(clues.every(v=>!v)){ toast(STR.addNumbers); return false; }
+  for(let i=0;i<81;i++){ if(!clues[i]) continue; for(const p of PEERS[i]) if(clues[p]===clues[i]){ setStatus(STR.fixRed,'err'); toast(STR.fixRed); render(); return false; } }
+  const r=solve(clues,2);
+  if(r.count===0){ setStatus(STR.noSolution,'err'); toast(STR.noSolution); return false; }
+  solution=r.solution; unique=r.count===1; mode='play';
+  return true;
+}
+
+/* ============ Interaction ============ */
+function select(i){ sel=i; render(); }
+
+function enter(n){
+  if(sel<0){ toast(STR.tapFirst); return; }
+  if(mode==='play'){
+    if(kind[sel]==='c'){ toast(STR.clueLocked); return; }
+    if(kind[sel]==='h'){ toast(STR.hintLocked); return; }
+    pushHistory(); val[sel]=n; kind[sel]='e';
+    const bad=render();
+    if(checkCell((sel/9)|0, sel%9)) vibrate(50);
+    if(val.every(v=>v) && bad.size===0) setStatus(STR.complete,'ok'); else setStatus(STR.playing);
+  } else {
+    pushHistory(); val[sel]=n; kind[sel]='c'; solution=null;
+    const bad=render();
+    setStatus(bad.size?STR.fixRed:STR.ready, bad.size?'err':'');
+  }
+}
+function erase(){
+  if(sel<0) return;
+  if(mode==='play' && (kind[sel]==='c' || kind[sel]==='h')){ toast(kind[sel]==='c'?STR.clueLocked:STR.hintLocked); return; }
+  if(!val[sel]) return;
+  pushHistory(); val[sel]=0; kind[sel]=''; if(mode==='setup') solution=null;
+  render(); setStatus(mode==='play'?STR.playing:STR.ready);
+}
+$('undo').addEventListener('click',()=>{ if(!history.length) return; restore(history.pop()); render(); setStatus(STR.undone); });
+
+function clearAll(){
+  pushHistory(); val=new Array(81).fill(0); kind=new Array(81).fill(''); sel=-1;
+  mode='setup'; solution=null; unique=true; hintCount=0;
+  render(); setStatus(STR.cleared);
+}
+
+document.querySelectorAll('#modeSeg button').forEach(b=>b.addEventListener('click',()=>{
+  const m=b.dataset.m; if(m===mode) return;
+  const snap=snapshot();
+  if(m==='play'){
+    if(!ensurePlay()) return;
+    pushHistory(snap); render(); setStatus(STR.playing);
+  } else {
+    pushHistory(snap);
+    for(let i=0;i<81;i++) if(kind[i]!=='c'){ val[i]=0; kind[i]=''; }
+    mode='setup'; solution=null; render(); setStatus(STR.settingClues);
+  }
+}));
+
+/* ---- Hint (rewarded-ad ready) ---- */
+function onHint(){
+  if(sel<0){ toast(STR.tapEmpty); return; }
+  if(val[sel]){ toast(STR.cellFilled); return; }
+  if(hintCount>=MAX_HINTS){ toast(STR.noHints); return; }
+  showHintRewarded();
+}
+function showHintRewarded(){
+  // TODO: show a Rewarded Ad here, and call giveHint() inside its "user earned reward" callback.
+  giveHint();
+}
+function giveHint(){
+  if(sel<0 || val[sel]) return;
+  const snap=snapshot();
+  if(!ensurePlay()) return;
+  pushHistory(snap);
+  val[sel]=solution[sel]; kind[sel]='h'; hintCount++;
+  const bad=render();
+  if(val.every(v=>v) && bad.size===0) setStatus(STR.complete,'ok'); else setStatus(STR.playing);
+}
+
+/* ---- Solve (interstitial every 3rd) ---- */
+function showInterstitial(){
+  // TODO: show an Interstitial Ad here.
+}
+function solveAll(){
+  const snap=snapshot();
+  const t0=performance.now();
+  if(!ensurePlay()) return;
+  pushHistory(snap);
+  for(let i=0;i<81;i++) if(kind[i]!=='c'&&kind[i]!=='h'){ val[i]=solution[i]; kind[i]='s'; }
+  render(true);
+  const ms=Math.max(1,Math.round(performance.now()-t0));
+  setStatus(unique?STR.solvedOne(ms):STR.solvedMany(ms),'ok');
+  solveCount++; if(solveCount%3===0) showInterstitial();
+}
+
+/* ---- Keyboard ---- */
+document.addEventListener('keydown',e=>{
+  if(!$('scanner').hidden || !$('sheet').hidden) return;
+  if(e.target.tagName==='BUTTON'&&(e.key==='Enter'||e.key===' ')) return;
+  if(e.key>='1'&&e.key<='9') enter(+e.key);
+  else if(e.key==='Backspace'||e.key==='Delete'||e.key==='0') erase();
+  else if(sel>=0){
+    let r=(sel/9)|0,c=sel%9;
+    if(e.key==='ArrowUp') r=(r+8)%9; else if(e.key==='ArrowDown') r=(r+1)%9;
+    else if(e.key==='ArrowLeft') c=(c+8)%9; else if(e.key==='ArrowRight') c=(c+1)%9; else return;
+    e.preventDefault(); select(r*9+c); cells[sel].focus();
+  }
+});
+
+/* ============ Load a puzzle (scan, import, example, paste) ============ */
+function loadClues(digits, msg, kindStatus){
+  pushHistory();
+  val=digits.slice(); kind=digits.map(v=>v?'c':''); sel=-1;
+  mode='setup'; solution=null; unique=true; hintCount=0;
+  const bad=render();
+  setStatus(bad.size?STR.fixRed:(msg||STR.imported), bad.size?'err':(kindStatus||''));
+}
+
+/* ============ Settings sheet ============ */
+function openSheet(){
+  document.querySelectorAll('input[name=theme]').forEach(r=>r.checked=(r.value===getThemeMode()));
+  $('scrim').hidden=false; $('sheet').hidden=false;
+}
+function closeSheet(){ $('scrim').hidden=true; $('sheet').hidden=true; }
+$('sheetTitle').textContent=STR.settings; $('themeHead').textContent=STR.themeHead;
+$('thLight').textContent=STR.light; $('thDark').textContent=STR.dark; $('thSystem').textContent=STR.system;
+$('moreHead').textContent=STR.moreHead; $('exampleBtn').textContent=STR.example;
+$('pasteBtn').textContent=STR.pasteBtn; $('copyBtn').textContent=STR.copyBtn; $('closeSheet').textContent=STR.close;
+$('settingsBtn').addEventListener('click',openSheet);
+$('scrim').addEventListener('click',closeSheet); $('closeSheet').addEventListener('click',closeSheet);
+document.querySelectorAll('input[name=theme]').forEach(r=>r.addEventListener('change',()=>{
+  try{ localStorage.setItem(THEME_KEY,r.value); }catch(e){}
+  applyTheme();
+}));
+$('exampleBtn').addEventListener('click',()=>{
+  closeSheet();
+  loadClues([...'800000000003600000070090200050007000000045700000100030001000068008500010090000400'].map(Number), STR.imported);
+});
+$('pasteBtn').addEventListener('click',()=>{
+  const s=prompt(STR.paste); if(s===null) return;
+  const t=s.replace(/[^0-9.]/g,'');
+  closeSheet();
+  if(t.length!==81){ toast(STR.need81(t.length)); return; }
+  loadClues([...t].map(ch=>ch==='.'?0:+ch), STR.imported);
+});
+$('copyBtn').addEventListener('click',async()=>{
+  const t=val.map((v,i)=>kind[i]==='c'?v:0).join('');
+  closeSheet();
+  try{ await navigator.clipboard.writeText(t); toast(STR.copied); }catch(e){ prompt(STR.copyThis,t); }
+});
+
+/* =====================================================================
+   SCANNING  (offline, no libraries)
+   grayscale -> 3x3 blur -> CLAHE -> adaptive threshold -> grid corners
+   -> perspective warp -> per-cell digit matching
+   ===================================================================== */
+const CV = {
+  gray(img){
+    const d=img.data, n=img.width*img.height, g=new Uint8ClampedArray(n);
+    for(let i=0,j=0;i<n;i++,j+=4) g[i]=(d[j]*299+d[j+1]*587+d[j+2]*114)/1000;
+    return g;
+  },
+  mean(g){ let s=0; for(let i=0;i<g.length;i++) s+=g[i]; return s/g.length; },
+  blur3(g,w,h){
+    const t=new Uint8ClampedArray(w*h), o=new Uint8ClampedArray(w*h);
+    for(let y=0;y<h;y++){ const r=y*w; for(let x=0;x<w;x++){
+      const a=g[r+(x>0?x-1:0)], b=g[r+x], c=g[r+(x<w-1?x+1:x)]; t[r+x]=(a+2*b+c)>>2; } }
+    for(let y=0;y<h;y++){ const y0=(y>0?y-1:0)*w, y1=y*w, y2=(y<h-1?y+1:y)*w;
+      for(let x=0;x<w;x++) o[y1+x]=(t[y0+x]+2*t[y1+x]+t[y2+x])>>2; }
+    return o;
+  },
+  clahe(g,w,h,clipLimit,tiles){
+    const tw=Math.ceil(w/tiles), th=Math.ceil(h/tiles), luts=new Uint8Array(tiles*tiles*256), hist=new Int32Array(256);
+    for(let ty=0;ty<tiles;ty++) for(let tx=0;tx<tiles;tx++){
+      hist.fill(0);
+      const x0=tx*tw,x1=Math.min(w,x0+tw),y0=ty*th,y1=Math.min(h,y0+th); let area=0;
+      for(let y=y0;y<y1;y++) for(let x=x0;x<x1;x++){ hist[g[y*w+x]]++; area++; }
+      const base=(ty*tiles+tx)*256;
+      if(!area){ for(let i=0;i<256;i++) luts[base+i]=i; continue; }
+      const clip=Math.max(1,Math.floor(clipLimit*area/256)); let excess=0;
+      for(let i=0;i<256;i++) if(hist[i]>clip){ excess+=hist[i]-clip; hist[i]=clip; }
+      const add=Math.floor(excess/256), rem=excess-add*256;
+      for(let i=0;i<256;i++) hist[i]+=add;
+      if(rem>0){ const step=Math.max(1,Math.floor(256/rem)); for(let i=0,r=rem;i<256&&r>0;i+=step,r--) hist[i]++; }
+      let sum=0; for(let i=0;i<256;i++){ sum+=hist[i]; luts[base+i]=Math.min(255,Math.round(sum*255/area)); }
+    }
+    const out=new Uint8ClampedArray(w*h);
+    const X1=new Int32Array(w),X2=new Int32Array(w),XA=new Float32Array(w);
+    for(let x=0;x<w;x++){ const f=x/tw-0.5; let a=Math.floor(f); XA[x]=f-a; let b=a+1; if(a<0)a=0; if(b>tiles-1)b=tiles-1; if(a>tiles-1)a=tiles-1; X1[x]=a; X2[x]=b; }
+    for(let y=0;y<h;y++){
+      const f=y/th-0.5; let a=Math.floor(f); const ya=f-a; let b=a+1; if(a<0)a=0; if(b>tiles-1)b=tiles-1; if(a>tiles-1)a=tiles-1;
+      const ra=a*tiles, rb=b*tiles;
+      for(let x=0;x<w;x++){
+        const v=g[y*w+x], xa=XA[x];
+        const p=luts[(ra+X1[x])*256+v], q=luts[(ra+X2[x])*256+v], r=luts[(rb+X1[x])*256+v], s=luts[(rb+X2[x])*256+v];
+        out[y*w+x]=(1-ya)*((1-xa)*p+xa*q)+ya*((1-xa)*r+xa*s);
+      }
+    }
+    return out;
+  },
+  adaptive(g,w,h,block,C,both){   // ADAPTIVE_THRESH_GAUSSIAN_C, THRESH_BINARY_INV  (ink = 1); both=true also marks lighter-than-local pixels
+    const sigma=0.3*((block-1)*0.5-1)+0.8, r=(block-1)>>1, k=new Float32Array(block); let ks=0;
+    for(let i=0;i<block;i++){ const d=i-r; k[i]=Math.exp(-d*d/(2*sigma*sigma)); ks+=k[i]; }
+    for(let i=0;i<block;i++) k[i]/=ks;
+    const t=new Float32Array(w*h), out=new Uint8Array(w*h);
+    for(let y=0;y<h;y++){ const row=y*w; for(let x=0;x<w;x++){ let s=0;
+      for(let j=-r;j<=r;j++){ let xx=x+j; if(xx<0)xx=0; else if(xx>=w)xx=w-1; s+=k[j+r]*g[row+xx]; } t[row+x]=s; } }
+    for(let y=0;y<h;y++){ for(let x=0;x<w;x++){ let s=0;
+      for(let j=-r;j<=r;j++){ let yy=y+j; if(yy<0)yy=0; else if(yy>=h)yy=h-1; s+=k[j+r]*t[yy*w+x]; }
+      const dv=g[y*w+x]-s; out[y*w+x]= both ? ((dv>C||dv<-C)?1:0) : (dv<=-C?1:0); } }
+    return out;
+  },
+  label(bin,w,h){                  // 8-connected components
+    const n=w*h, labels=new Int32Array(n), stack=new Int32Array(n), comps=[null]; let id=0;
+    for(let i0=0;i0<n;i0++){
+      if(!bin[i0]||labels[i0]) continue;
+      id++;
+      const c={id,count:0,minx:w,maxx:0,miny:h,maxy:0,
+        tlS:1e9,tlx:0,tly:0, brS:-1e9,brx:0,bry:0, trD:-1e9,trx:0,try_:0, blD:1e9,blx:0,bly:0};
+      let sp=0; stack[sp++]=i0; labels[i0]=id;
+      while(sp){
+        const p=stack[--sp], y=(p/w)|0, x=p-y*w;
+        c.count++; if(x<c.minx)c.minx=x; if(x>c.maxx)c.maxx=x; if(y<c.miny)c.miny=y; if(y>c.maxy)c.maxy=y;
+        const s=x+y, d=x-y;
+        if(s<c.tlS){c.tlS=s;c.tlx=x;c.tly=y;} if(s>c.brS){c.brS=s;c.brx=x;c.bry=y;}
+        if(d>c.trD){c.trD=d;c.trx=x;c.try_=y;} if(d<c.blD){c.blD=d;c.blx=x;c.bly=y;}
+        for(let dy=-1;dy<=1;dy++){ const yy=y+dy; if(yy<0||yy>=h) continue;
+          for(let dx=-1;dx<=1;dx++){ const xx=x+dx; if(xx<0||xx>=w) continue;
+            const q=yy*w+xx; if(bin[q]&&!labels[q]){ labels[q]=id; stack[sp++]=q; } } }
+      }
+      comps.push(c);
+    }
+    return {labels,comps};
+  },
+  homography(dst,src){             // maps dst points -> src points
+    const A=[],b=[];
+    for(let k=0;k<4;k++){ const [u,v]=dst[k],[x,y]=src[k];
+      A.push([u,v,1,0,0,0,-x*u,-x*v]); b.push(x);
+      A.push([0,0,0,u,v,1,-y*u,-y*v]); b.push(y); }
+    for(let i=0;i<8;i++){
+      let p=i; for(let r=i+1;r<8;r++) if(Math.abs(A[r][i])>Math.abs(A[p][i])) p=r;
+      [A[i],A[p]]=[A[p],A[i]]; [b[i],b[p]]=[b[p],b[i]];
+      for(let r=i+1;r<8;r++){ const f=A[r][i]/A[i][i]; for(let c=i;c<8;c++) A[r][c]-=f*A[i][c]; b[r]-=f*b[i]; } }
+    const h=new Array(8).fill(0);
+    for(let i=7;i>=0;i--){ let s=b[i]; for(let c=i+1;c<8;c++) s-=A[i][c]*h[c]; h[i]=s/A[i][i]; }
+    return h;
+  },
+  warp(g,w,h,H,S){
+    const out=new Uint8ClampedArray(S*S);
+    for(let v=0;v<S;v++) for(let u=0;u<S;u++){
+      const uu=u+0.5, vv=v+0.5, den=H[6]*uu+H[7]*vv+1;
+      let x=(H[0]*uu+H[1]*vv+H[2])/den-0.5, y=(H[3]*uu+H[4]*vv+H[5])/den-0.5;
+      if(x<0)x=0; else if(x>w-1.001)x=w-1.001; if(y<0)y=0; else if(y>h-1.001)y=h-1.001;
+      const x0=x|0,y0=y|0,fx=x-x0,fy=y-y0, i=y0*w+x0;
+      out[v*S+u]=(1-fy)*((1-fx)*g[i]+fx*g[i+1])+fy*((1-fx)*g[i+w]+fx*g[i+w+1]);
+    }
+    return out;
+  }
+};
+
+/* ---- digit templates rendered from system fonts ---- */
+const NW=16, NH=24;
+let TEMPLATES=null;
+function normalizeMask(mask,w,x0,y0,x1,y1){      // bbox inclusive -> NWxNH grid of ink fraction + aspect
+  const bw=x1-x0+1, bh=y1-y0+1, vec=new Float32Array(NW*NH);
+  for(let ty=0;ty<NH;ty++){
+    const ya=y0+ty*bh/NH, yb=y0+(ty+1)*bh/NH, iy0=Math.floor(ya), iy1=Math.max(iy0+1,Math.ceil(yb));
+    for(let tx=0;tx<NW;tx++){
+      const xa=x0+tx*bw/NW, xb=x0+(tx+1)*bw/NW, ix0=Math.floor(xa), ix1=Math.max(ix0+1,Math.ceil(xb));
+      let s=0,n=0;
+      for(let y=iy0;y<iy1&&y<=y1;y++) for(let x=ix0;x<ix1&&x<=x1;x++){ s+=mask[y*w+x]; n++; }
+      vec[ty*NW+tx]=n?s/n:0;
+    }
+  }
+  return {vec,asp:bw/bh};
+}
+function buildTemplates(){
+  if(TEMPLATES) return TEMPLATES;
+  const fams=['sans-serif','Arial','Helvetica','Roboto','Verdana','Tahoma','Trebuchet MS','system-ui','serif','Georgia','Times New Roman','monospace','Courier New'];
+  const W=110,H=140, cv=document.createElement('canvas'); cv.width=W; cv.height=H;
+  const ctx=cv.getContext('2d',{willReadFrequently:true}), list=[], seen=new Set();
+  function add(d){
+    const px=ctx.getImageData(0,0,W,H).data, mask=new Uint8Array(W*H);
+    let x0=W,y0=H,x1=-1,y1=-1;
+    for(let y=0;y<H;y++) for(let x=0;x<W;x++) if(px[(y*W+x)*4+3]>110){ mask[y*W+x]=1; if(x<x0)x0=x; if(x>x1)x1=x; if(y<y0)y0=y; if(y>y1)y1=y; }
+    if(x1<0) return;
+    const f=normalizeMask(mask,W,x0,y0,x1,y1);
+    const key=d+':'+Array.from(f.vec,v=>Math.round(v*4)).join('');
+    if(seen.has(key)) return; seen.add(key);
+    list.push({d,vec:f.vec,asp:f.asp});
+  }
+  for(const fam of fams) for(const wt of ['400','700']) for(const sw of [0,5]) for(let d=1;d<=9;d++){
+    ctx.clearRect(0,0,W,H); ctx.fillStyle='#000'; ctx.strokeStyle='#000'; ctx.lineJoin='round';
+    ctx.font=`${wt} 100px ${fam}`; ctx.textBaseline='alphabetic'; ctx.textAlign='center';
+    ctx.fillText(String(d),W/2,108);
+    if(sw){ ctx.lineWidth=sw; ctx.strokeText(String(d),W/2,108); }
+    add(d);
+  }
+  // hand-drawn "1" shapes (plain stem, with flag, with flag + base) so unusual fonts still match
+  for(const stem of [9,15,22]) for(const flag of [0,1,2]) for(const base of [0,1]){
+    ctx.clearRect(0,0,W,H); ctx.fillStyle='#000'; ctx.strokeStyle='#000'; ctx.lineCap='butt';
+    ctx.fillRect(W/2-stem/2,20,stem,90);
+    if(flag){ ctx.lineWidth=stem*0.9; ctx.beginPath(); ctx.moveTo(W/2-stem/2+2,24); ctx.lineTo(W/2-stem/2-(flag===1?16:28),flag===1?40:50); ctx.stroke(); }
+    if(base) ctx.fillRect(W/2-24,110-stem*0.5,48,stem*0.5+0);
+    add(1);
+  }
+  TEMPLATES=list; return list;
+}
+const ASP_W=0.6;
+function classify(feat){
+  const T=buildTemplates(), N=NW*NH, best=new Array(10).fill(1e9);
+  for(const t of T){
+    let s=0; const a=feat.vec,b=t.vec;
+    for(let i=0;i<N;i++){ const x=a[i]-b[i]; s+=x*x; }
+    s=s/N+ASP_W*(feat.asp-t.asp)*(feat.asp-t.asp);
+    if(s<best[t.d]) best[t.d]=s;
+  }
+  let d1=1e9,dig=0; for(let d=1;d<=9;d++) if(best[d]<d1){ d1=best[d]; dig=d; }
+  let d2=1e9; for(let d=1;d<=9;d++) if(d!==dig&&best[d]<d2) d2=best[d];
+  const fit=Math.max(0,Math.min(1,1-d1/0.53));
+  const margin=Math.max(0,Math.min(1,(d2-d1)/0.04));
+  return {digit:dig,d1,d2,conf:fit*(0.9+0.1*margin)};
+}
+
+/* ---- full pipeline ---- */
+const SIZE=450, CONF_CELL=0.6, CONF_LOW=0.7;
+/* find the 4 corners of the grid (works for dark lines, light lines, or both) */
+function findGrid(g,w,h,mode){                             // mode true = lines of any colour, false = dark lines only
+  const minDim=Math.min(w,h);
+  {
+    const bin=CV.adaptive(g,w,h,11,mode?5:2,mode), {comps}=CV.label(bin,w,h);
+    let best=null,bestScore=0;
+    for(let i=1;i<comps.length;i++){ const c=comps[i], bw=c.maxx-c.minx+1, bh=c.maxy-c.miny+1;
+      if(bw<minDim*0.3||bh<minDim*0.3) continue;
+      const sq=Math.min(bw,bh)/Math.max(bw,bh); if(sq<0.6) continue;
+      const q=[[c.tlx,c.tly],[c.trx,c.try_],[c.brx,c.bry],[c.blx,c.bly]];
+      const sides=[0,1,2,3].map(k=>Math.hypot(q[(k+1)%4][0]-q[k][0],q[(k+1)%4][1]-q[k][1]));
+      if(Math.min(...sides)/Math.max(...sides)<0.6) continue;           // not a square-ish quad
+      const sc=c.count*sq*sq; if(sc>bestScore){ bestScore=sc; best=q; } }
+    if(best) return best;
+  }
+  return null;
+}
+/* true when digits are lighter than their background (dark-mode screenshots) */
+function digitsAreLight(wg,S){
+  const cs=S/9, m=Math.round(cs*0.11), hist=new Int32Array(256); let light=0, dark=0;
+  for(let r=0;r<9;r++) for(let c=0;c<9;c++){
+    const x0=Math.round(c*cs)+m, y0=Math.round(r*cs)+m, x1=Math.round((c+1)*cs)-m, y1=Math.round((r+1)*cs)-m;
+    hist.fill(0); let n=0;
+    for(let y=y0;y<y1;y++) for(let x=x0;x<x1;x++){ hist[wg[y*S+x]]++; n++; }
+    let acc=0, med=0; for(let v=0;v<256;v++){ acc+=hist[v]; if(acc>=n/2){ med=v; break; } }
+    for(let v=0;v<256;v++){ const d=v-med; if(d>40) light+=hist[v]*d; else if(d<-40) dark+=hist[v]*(-d); }
+  }
+  return light>dark*1.2;
+}
+/* read the 81 cells from the straightened grid */
+function ocrWarped(wg,S,invert){
+  let img=wg;
+  if(invert){ img=new Uint8ClampedArray(wg.length); for(let i=0;i<wg.length;i++) img[i]=255-wg[i]; }
+  const ink=CV.adaptive(CV.blur3(img,S,S),S,S,25,3);
+  const cs=S/9, m=Math.round(cs*0.11), digits=new Array(81).fill(0), confs=new Array(81).fill(0), info=[];
+  for(let r=0;r<9;r++) for(let c=0;c<9;c++){
+    const x0=Math.round(c*cs)+m, y0=Math.round(r*cs)+m, x1=Math.round((c+1)*cs)-m, y1=Math.round((r+1)*cs)-m, cw=x1-x0, ch=y1-y0;
+    const crop=new Uint8Array(cw*ch);
+    for(let y=0;y<ch;y++) for(let x=0;x<cw;x++) crop[y*cw+x]=ink[(y0+y)*S+x0+x];
+    const L=CV.label(crop,cw,ch); let maxCount=0;
+    const keep=new Uint8Array(L.comps.length);
+    for(let i=1;i<L.comps.length;i++){ const k=L.comps[i];
+      if(k.minx===0||k.miny===0||k.maxx===cw-1||k.maxy===ch-1) continue;      // touches border = grid line
+      if(k.count<8) continue;
+      keep[i]=1; if(k.count>maxCount) maxCount=k.count; }
+    if(maxCount<cw*ch*0.012){ continue; }
+    let ux0=cw,uy0=ch,ux1=-1,uy1=-1;
+    for(let i=1;i<L.comps.length;i++){ if(!keep[i]||L.comps[i].count<maxCount*0.2) { keep[i]=0; continue; }
+      const k=L.comps[i]; if(k.minx<ux0)ux0=k.minx; if(k.miny<uy0)uy0=k.miny; if(k.maxx>ux1)ux1=k.maxx; if(k.maxy>uy1)uy1=k.maxy; }
+    if(ux1<0 || (uy1-uy0+1)<ch*0.28) continue;
+    const mask=new Uint8Array(cw*ch); let inkPx=0;
+    for(let p=0;p<cw*ch;p++) if(keep[L.labels[p]]){ mask[p]=1; inkPx++; }
+    const fill=inkPx/((ux1-ux0+1)*(uy1-uy0+1));
+    if(fill<0.27||fill>0.9) continue;
+    const res=classify(normalizeMask(mask,cw,ux0,uy0,ux1,uy1));
+    info.push({r,c,digit:res.digit,conf:res.conf,d1:res.d1,bw:ux1-ux0+1,bh:uy1-uy0+1,fill});
+    if(res.conf>=CONF_CELL){ digits[r*9+c]=res.digit; confs[r*9+c]=res.conf; }
+  }
+  const found=digits.filter(Boolean).length;
+  let conf=0; if(found){ let s=0; for(let i=0;i<81;i++) if(digits[i]) s+=confs[i]; conf=s/found; }
+  return {ok:true,digits,conf,found,info,inverted:!!invert};
+}
+const scoreOf=r=>r.ok?r.found*r.conf:-1;
+function readGrid(img){
+  const t0=performance.now(), w=img.width, h=img.height;
+  let g=CV.gray(img);
+  const avg=CV.mean(g);
+  if(avg<80){ for(let i=0;i<g.length;i++){ const v=g[i]*1.3+40; g[i]=v>255?255:v; } }     // low light boost
+  g=CV.blur3(g,w,h);
+  g=CV.clahe(g,w,h,2.0,8);
+  const S=SIZE;
+  function attempt(src){
+    const H=CV.homography([[0,0],[S,0],[S,S],[0,S]],src), wg=CV.warp(g,w,h,H,S), light=digitsAreLight(wg,S);
+    let r=ocrWarped(wg,S,light);
+    if(r.found<8||r.conf<CONF_LOW){ const alt=ocrWarped(wg,S,!light); if(scoreOf(alt)>scoreOf(r)) r=alt; }
+    return r;
+  }
+  let best=null;
+  for(const mode of [true,false]){
+    const src=findGrid(g,w,h,mode); if(!src) continue;
+    const r=attempt(src);
+    if(!best||scoreOf(r)>scoreOf(best)) best=r;
+    if(best.found>=8&&best.conf>=CONF_LOW) break;
+  }
+  if(!best) return {ok:false,reason:'grid',ms:performance.now()-t0,avg};
+  best.ms=performance.now()-t0; best.avg=avg;
+  return best;
+}
+window.__sudokuScan={readGrid,buildTemplates};
+
+/* ---- run a scan on an image / video frame ---- */
+const MAXDIM=800;
+function frameToImageData(src,w,h){
+  const sc=Math.min(1,MAXDIM/Math.max(w,h)), cw=Math.round(w*sc), ch=Math.round(h*sc);
+  const cv=document.createElement('canvas'); cv.width=cw; cv.height=ch;
+  const ctx=cv.getContext('2d',{willReadFrequently:true}); ctx.drawImage(src,0,0,cw,ch);
+  return ctx.getImageData(0,0,cw,ch);
+}
+const tick=()=>new Promise(r=>setTimeout(r,30));
+let pending=null;
+
+async function runScan(src,w,h,fromCamera){
+  setStatus(STR.reading); if(fromCamera) setScanMsg(STR.reading);
+  await tick();
+  let res;
+  try{ res=readGrid(frameToImageData(src,w,h)); }catch(e){ console.error(e); res={ok:false}; }
+  window.__lastScan=res;
+  if(!res.ok){
+    if(fromCamera){ setScanMsg(res.avg<90?STR.needLight:STR.noGrid,true); }
+    setStatus(STR.noGrid,'err'); toast(STR.noGrid); return;
+  }
+  if(res.found<4){
+    if(fromCamera) setScanMsg(STR.needLight,true);
+    setStatus(STR.noDigits,'err'); toast(STR.noDigits); return;
+  }
+  const low=res.conf<CONF_LOW;
+  if(fromCamera && low){
+    pending=res.digits; setScanMsg(STR.needLight,true); $('useAnyway').hidden=false; setStatus(STR.scannedLow(res.found)); return;
+  }
+  if(fromCamera) closeScanner();
+  loadClues(res.digits, low?STR.scannedLow(res.found):STR.scanned(res.found), low?'':'ok');
+}
+
+async function loadFile(file,fromCamera){
+  if(!file) return;
+  setStatus(STR.reading); await tick();
+  let bmp=null, url=null, img=null;
+  try{ bmp=await createImageBitmap(file); }catch(e){
+    url=URL.createObjectURL(file); img=new Image();
+    await new Promise((ok,bad)=>{ img.onload=ok; img.onerror=bad; img.src=url; }).catch(()=>{});
+  }
+  const src=bmp||img; if(!src||!(bmp?bmp.width:img.naturalWidth)){ toast(STR.noGrid); return; }
+  const w=bmp?bmp.width:img.naturalWidth, h=bmp?bmp.height:img.naturalHeight;
+  await runScan(src,w,h,false);
+  if(url) URL.revokeObjectURL(url);
+}
+for(const id of ['filePick','fileCam']){
+  $(id).addEventListener('change',e=>{ const f=e.target.files&&e.target.files[0]; e.target.value=''; loadFile(f,false); });
+}
+
+/* ---- live camera overlay ---- */
+let stream=null, track=null, torchOn=false, torchTried=false, camTimer=null;
+const camEl=$('cam');
+let msgHold=0;
+function setScanMsg(t,warn){ const m=$('scanMsg'); m.textContent=t; m.classList.toggle('warn',!!warn); msgHold=warn?Date.now()+3500:0; }
+
+async function setTorch(on){
+  try{
+    const caps=track&&track.getCapabilities?track.getCapabilities():{};
+    if(!caps.torch) return false;
+    await track.applyConstraints({advanced:[{torch:on}]});
+    torchOn=on; $('flashBtn').classList.toggle('on',on); return true;
+  }catch(e){ return false; }
+}
+function checkLight(){
+  if(!camEl.videoWidth) return;
+  const cv=checkLight.cv||(checkLight.cv=document.createElement('canvas')); cv.width=48; cv.height=36;
+  const ctx=cv.getContext('2d',{willReadFrequently:true}); ctx.drawImage(camEl,0,0,48,36);
+  const m=CV.mean(CV.gray(ctx.getImageData(0,0,48,36)));
+  if(m<60){
+    if(!torchOn && !torchTried){ torchTried=true; setTorch(true).then(ok=>setScanMsg(ok?STR.flashOn:STR.needLight,!ok)); }
+    else if(!torchOn) setScanMsg(STR.needLight,true);
+  } else if($('scanMsg').classList.contains('warn') && !pending && Date.now()>msgHold) setScanMsg(STR.scanHint);
+}
+async function openScanner(){
+  if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){ $('fileCam').click(); return; }
+  try{
+    stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:1920},height:{ideal:1080}},audio:false});
+  }catch(e){ $('fileCam').click(); return; }
+  camEl.srcObject=stream; try{ await camEl.play(); }catch(e){}
+  track=stream.getVideoTracks()[0]; torchOn=false; torchTried=false; pending=null;
+  $('flashBtn').classList.remove('on'); $('useAnyway').hidden=true;
+  setScanMsg(STR.scanHint); $('scanner').hidden=false;
+  camTimer=setInterval(checkLight,700);
+}
+function closeScanner(){
+  clearInterval(camTimer); camTimer=null;
+  if(stream) stream.getTracks().forEach(t=>t.stop());
+  stream=null; track=null; torchOn=false; camEl.srcObject=null; pending=null;
+  $('scanner').hidden=true; $('useAnyway').hidden=true;
+}
+$('scanClose').addEventListener('click',closeScanner);
+$('flashBtn').addEventListener('click',async()=>{
+  const ok=await setTorch(!torchOn); if(!ok){ toast(STR.flashNo); }
+});
+$('shutter').addEventListener('click',()=>{
+  if(!camEl.videoWidth) return;
+  $('useAnyway').hidden=true; pending=null;
+  runScan(camEl,camEl.videoWidth,camEl.videoHeight,true);
+});
+$('useAnyway').textContent=STR.useAnyway;
+$('useAnyway').addEventListener('click',()=>{
+  const d=pending; closeScanner(); if(d) loadClues(d, STR.scannedLow(d.filter(Boolean).length));
+});
+
+/* ---- init ---- */
+render(); setStatus(STR.tap);
+setTimeout(()=>{ try{ buildTemplates(); }catch(e){} },400);   // warm up digit templates
+})();
+</script>
+</body>
+</html>
