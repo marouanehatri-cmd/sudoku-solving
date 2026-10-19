@@ -44,6 +44,17 @@ jobs:
             cp $RES/mipmap-$name/ic_launcher.png $RES/mipmap-$name/ic_launcher_foreground.png
           done
 
+      - name: Set splash screen
+        run: |
+          BG=$(convert icon.jpg -format '%[pixel:p{2,2}]' info:)
+          for f in $(find android/app/src/main/res -name 'splash*.png'); do
+            dims=$(identify -format '%w %h' "$f")
+            w=${dims% *}
+            h=${dims#* }
+            s=$(( (w < h ? w : h) * 45 / 100 ))
+            convert -size ${w}x${h} xc:"$BG" \( icon.jpg -resize ${s}x${s} \) -gravity center -composite "$f"
+          done
+
       - name: Sync web files
         run: npx cap sync android
 
